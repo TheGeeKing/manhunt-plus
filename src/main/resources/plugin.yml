@@ -1,40 +1,43 @@
 name: ManhuntPlus
-version: '1.3'
-main: net.tutla.manhuntPlus.ManhuntPlus
+version: '${version}'
+main: net.tutla.manhuntPlus.bootstrap.ManhuntPlusPlugin
 api-version: '1.21'
 authors: [ TutlaMC ]
 website: https://tutla.net
 permissions:
-  permission.node:
-    description: "This is a permission node"
+  manhuntplus.admin:
+    description: "Administrative access to setup and control commands"
     default: op
-    children:
-      permission.node.child: true
+  manhuntplus.play:
+    description: "Gameplay command access"
+    default: true
 commands:
   compass:
     description: Gives a tracking compass
     usage: /<command> <player>
+    permission: manhuntplus.play
   twist:
     description: Changes the twist
     usage: /<command> <twist>
-    permission: permission.node
+    permission: manhuntplus.admin
   speedrunner:
     description: Add or remove a runner
     usage: /<command> add|remove <player>
-    permission: permission.node
+    permission: manhuntplus.admin
   hunter:
     description: Add/remove a hunter
     usage: /<command> add|remove <player>
-    permission: permission.node
+    permission: manhuntplus.admin
   manhunt:
     description: Start/stop/set cooldown/prepare
     usage: /<command> start|stop|cooldown|help|prepare|list
-    permission: permission.node
+    permission: manhuntplus.admin
   surround:
     description: Surround a speedrunner with hunters
     usage: /<command> <player>
-    permission: permission.node
+    permission: manhuntplus.admin
   randomvillage:
     description: Teleport near the nearest random village type
     usage: /<command>
-    permission: permission.node
+    permission: manhuntplus.admin
+

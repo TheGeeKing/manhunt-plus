@@ -1,10 +1,14 @@
 auto-calibration: true # disable on large servers
 auto-calibration-interval: 10 # recommended to increase this if used on larger servers or even completely disable it, restart server to apply changes
 name-tracking-compass: true
+default-team-compass: false
 broadcast-time: true
 broadcast-time-every: 1800 # every 30 mintues it will broadcast remaining time
 
 surround-radius: 3.0 # keep it a decimal/float/double
+permissions:
+  admin: "manhuntplus.admin"
+  play: "manhuntplus.play"
 
 # Twist Settings this is WIP
 #
