@@ -249,7 +249,7 @@ public class EventListeners implements Listener {
         Player victim = (Player) event.getEntity();
         if (ManhuntPlus.getInstance().getSpeedrunners().contains(hitter.getUniqueId()) && ManhuntPlus.getInstance().getHunters().contains(victim.getUniqueId())) {
             if (ManhuntPlus.getInstance().waitingForStart) {
-                ManhuntPlus.getInstance().startManhunt();
+                ManhuntPlus.getInstance().startManhunt(hitter.getLocation());
             }
         }
     }

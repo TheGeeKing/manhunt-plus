@@ -491,9 +491,12 @@ public final class ManhuntPlus extends JavaPlugin {
         }
     }
 
-    public Boolean startManhunt(){
+    public Boolean startManhunt(Location startLocation){
         waitingForStart = false;
         if (!started) {
+            if (startLocation != null && startLocation.getWorld() != null) {
+                startLocation.getWorld().setSpawnLocation(startLocation);
+            }
             prepareAllPlayersForStart();
             setStatus(true);
             startTimer();
@@ -895,7 +898,7 @@ public final class ManhuntPlus extends JavaPlugin {
 
             switch (args[0].toLowerCase()) { // first time i actually used a switch case my whole life (if statements worked well so like it wasn't necessary but like worth trying)
                 case "start" -> {
-                    if (!startManhunt()){
+                    if (!startManhunt(player.getLocation())){
                         player.sendMessage("§cManhunt already running.");
                     }
                 }
@@ -1074,5 +1077,6 @@ public final class ManhuntPlus extends JavaPlugin {
 
 
 }
+
 
 
