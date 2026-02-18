@@ -3,7 +3,13 @@ package net.tutla.manhuntPlus;
 import net.tutla.manhuntPlus.lootpool.LevellingFactory;
 import net.tutla.manhuntPlus.lootpool.LootPool;
 import net.tutla.manhuntPlus.lootpool.LootPoolLevelling;
+import org.bukkit.GameMode;
+import org.bukkit.GameRule;
 import org.bukkit.NamespacedKey;
+import org.bukkit.World;
+import org.bukkit.advancement.Advancement;
+import org.bukkit.advancement.AdvancementProgress;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.Bukkit;
@@ -14,7 +20,13 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.CompassMeta;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scoreboard.DisplaySlot;
+import org.bukkit.scoreboard.Objective;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.ScoreboardManager;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -36,24 +48,52 @@ public final class ManhuntPlus extends JavaPlugin {
     // runners/hunters
     private final List<UUID> speedrunners = new ArrayList<>();
     private final List<UUID> playingSpeedrunners = new ArrayList<>();
+    private final Set<UUID> eliminatedSpeedrunners = new HashSet<>();
+    private final Map<UUID, Location> eliminatedSpeedrunnerDeathLocations = new HashMap<>();
     private final List<UUID> hunters = new ArrayList<>();
+    private Location lastEliminatedSpeedrunnerLocation = null;
     // settings
     private Twist twist = Twist.DEFAULT;
     private int timer = 0;
     private int timerTaskId = -1;
     private int countdownLimitMinutes = 0;
+    private int startCountdownSeconds = 0;
+    private boolean huntersFrozen = false;
+    private int huntersFreezeSecondsRemaining = 0;
+    private int huntersFreezeTaskId = -1;
+    private final Set<UUID> respawnedHuntersDuringFreeze = new HashSet<>();
+    private boolean teamCompassEnabled = false;
+    private int teamCompassTaskId = -1;
+    private final Set<UUID> teamCompassViewers = new HashSet<>();
+    private final Map<UUID, Deque<PortalTransition>> speedrunnerPortalTransitions = new HashMap<>();
     // compass shit
     Map<UUID, Player> trackedCompasses = new HashMap<>();
-    public static void updateCompass(ItemStack item, UUID compassId, Player target){
+    private static final class PortalTransition {
+        private final World.Environment fromEnv;
+        private final World.Environment toEnv;
+        private final Location fromLocation;
+        private final Location toLocation;
+
+        private PortalTransition(World.Environment fromEnv, World.Environment toEnv, Location fromLocation, Location toLocation) {
+            this.fromEnv = fromEnv;
+            this.toEnv = toEnv;
+            this.fromLocation = fromLocation;
+            this.toLocation = toLocation;
+        }
+    }
+
+    public static void updateCompass(ItemStack item, UUID compassId, Player target, Player holder){
         if (item == null || item.getType() != Material.COMPASS) return;
+        if (target == null || !target.isOnline()) return;
 
         CompassMeta meta = (CompassMeta) item.getItemMeta();
         if (meta == null) return;
 
         String id = meta.getPersistentDataContainer().get(COMPASS_ID_KEY, PersistentDataType.STRING);
         if (id != null && id.equals(compassId.toString())) {
-            if (!target.isSneaking()){
-                meta.setLodestone(target.getLocation());
+            Location trackingLocation = getInstance().resolveTrackingLocation(holder, target);
+            if (trackingLocation != null && !target.isSneaking()){
+                meta.setLodestone(trackingLocation);
                 meta.setLodestoneTracked(false);
                 item.setItemMeta(meta);
             }
@@ -106,6 +146,38 @@ public final class ManhuntPlus extends JavaPlugin {
     public List<UUID> getHunters(){
         return hunters;
     }
+    public boolean isEliminatedSpeedrunner(UUID playerId) {
+        return eliminatedSpeedrunners.contains(playerId);
+    }
+    public void markSpeedrunnerEliminated(Player player) {
+        eliminatedSpeedrunners.add(player.getUniqueId());
+    }
+    public void clearEliminatedSpeedrunners() {
+        eliminatedSpeedrunners.clear();
+        eliminatedSpeedrunnerDeathLocations.clear();
+    }
+    public void setEliminatedSpeedrunnerDeathLocation(UUID playerId, Location location) {
+        if (playerId == null || location == null) return;
+        eliminatedSpeedrunnerDeathLocations.put(playerId, location.clone());
+    }
+    public Location getEliminatedSpeedrunnerDeathLocation(UUID playerId) {
+        Location location = eliminatedSpeedrunnerDeathLocations.get(playerId);
+        return location == null ? null : location.clone();
+    }
+    public void recordSpeedrunnerPortalTransition(Player player, Location from, Location to) {
+        if (player == null || from == null || to == null) return;
+        if (from.getWorld() == null || to.getWorld() == null) return;
+
+        World.Environment fromEnv = from.getWorld().getEnvironment();
+        World.Environment toEnv = to.getWorld().getEnvironment();
+        if (fromEnv == toEnv) return;
+
+        Deque<PortalTransition> transitions = speedrunnerPortalTransitions.computeIfAbsent(player.getUniqueId(), ignored -> new ArrayDeque<>());
+        transitions.addLast(new PortalTransition(fromEnv, toEnv, from.clone(), to.clone()));
+        while (transitions.size() > 64) {
+            transitions.removeFirst();
+        }
+    }
 
     public void addSpeedrunner(Player player){
         if (!speedrunners.contains((player.getUniqueId()))){
@@ -129,6 +201,12 @@ public final class ManhuntPlus extends JavaPlugin {
     }
     public void removeHunter(Player player){
         hunters.remove(player.getUniqueId());
+        if (teamCompassViewers.remove(player.getUniqueId())) {
+            ScoreboardManager manager = Bukkit.getScoreboardManager();
+            if (manager != null) {
+                player.setScoreboard(manager.getMainScoreboard());
+            }
+        }
     }
 
     public Twist getTwist() {
@@ -139,6 +217,49 @@ public final class ManhuntPlus extends JavaPlugin {
     }
     public LootPool getDefaultLoot() {
         return basicLootPool;
+    }
+    public boolean areHuntersFrozen() {
+        return huntersFrozen;
+    }
+    public int getStartCountdownSeconds() {
+        return startCountdownSeconds;
+    }
+    public boolean isTeamCompassEnabled() {
+        return teamCompassEnabled;
+    }
+    public void setTeamCompassEnabled(boolean enabled) {
+        teamCompassEnabled = enabled;
+        if (!enabled) {
+            stopTeamCompassSidebar();
+            return;
+        }
+
+        if (started) {
+            startTeamCompassSidebar();
+        }
+    }
+    public void setStartCountdownSeconds(int seconds) {
+        startCountdownSeconds = Math.max(0, seconds);
+    }
+    public void markHunterRespawnDuringFreeze(Player hunter) {
+        if (hunter == null) return;
+        if (!huntersFrozen) return;
+        respawnedHuntersDuringFreeze.add(hunter.getUniqueId());
+        hunter.setLevel(0);
+        hunter.setExp(0f);
+    }
+    public boolean isHunterRespawnExempt(UUID playerId) {
+        return respawnedHuntersDuringFreeze.contains(playerId);
+    }
+    public void syncHunterFreezeBar(Player hunter) {
+        if (hunter == null || !hunter.isOnline()) return;
+        if (!huntersFrozen) return;
+        if (isHunterRespawnExempt(hunter.getUniqueId())) return;
+
+        float progress = startCountdownSeconds <= 0 ? 0f : (float) huntersFreezeSecondsRemaining / startCountdownSeconds;
+        progress = Math.max(0f, Math.min(1f, progress));
+        hunter.setLevel(huntersFreezeSecondsRemaining);
+        hunter.setExp(progress);
     }
 
     public void startTimer() {
@@ -168,13 +289,224 @@ public final class ManhuntPlus extends JavaPlugin {
         }
     }
 
+    private void clearStartCountdownBar() {
+        for (UUID id : hunters) {
+            Player hunter = Bukkit.getPlayer(id);
+            if (hunter != null && hunter.isOnline()) {
+                hunter.setLevel(0);
+                hunter.setExp(0f);
+            }
+        }
+        for (UUID id : speedrunners) {
+            Player speedrunner = Bukkit.getPlayer(id);
+            if (speedrunner != null && speedrunner.isOnline()) {
+                speedrunner.setLevel(0);
+                speedrunner.setExp(0f);
+            }
+        }
+    }
+
+    private void unfreezeHunters() {
+        huntersFrozen = false;
+        huntersFreezeSecondsRemaining = 0;
+        if (huntersFreezeTaskId != -1) {
+            Bukkit.getScheduler().cancelTask(huntersFreezeTaskId);
+            huntersFreezeTaskId = -1;
+        }
+        clearStartCountdownBar();
+        respawnedHuntersDuringFreeze.clear();
+    }
+
+    private void startHunterReleaseCountdown() {
+        unfreezeHunters();
+        if (startCountdownSeconds <= 0) return;
+
+        huntersFrozen = true;
+        huntersFreezeSecondsRemaining = startCountdownSeconds;
+        huntersFreezeTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(this, () -> {
+            if (!started) {
+                unfreezeHunters();
+                return;
+            }
+
+            for (UUID id : hunters) {
+                Player hunter = Bukkit.getPlayer(id);
+                if (hunter != null && hunter.isOnline()) {
+                    syncHunterFreezeBar(hunter);
+                }
+            }
+            float progress = startCountdownSeconds <= 0 ? 0f : (float) huntersFreezeSecondsRemaining / startCountdownSeconds;
+            progress = Math.max(0f, Math.min(1f, progress));
+            for (UUID id : speedrunners) {
+                Player speedrunner = Bukkit.getPlayer(id);
+                if (speedrunner != null && speedrunner.isOnline()) {
+                    speedrunner.setLevel(huntersFreezeSecondsRemaining);
+                    speedrunner.setExp(progress);
+                }
+            }
+
+            if (huntersFreezeSecondsRemaining <= 0) {
+                unfreezeHunters();
+                Bukkit.broadcastMessage("§aHunters released!");
+                return;
+            }
+
+            huntersFreezeSecondsRemaining--;
+        }, 0L, 20L);
+    }
+
+    private String getDirectionLabel(Location from, Location to) {
+        double dx = to.getX() - from.getX();
+        double dz = to.getZ() - from.getZ();
+        if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) return "•";
+
+        double angle = Math.toDegrees(Math.atan2(dx, -dz));
+        if (angle < 0) angle += 360;
+        String[] dirs = {"↑", "↗", "→", "↘", "↓", "↙", "←", "↖"};
+        int index = (int) Math.round(angle / 45.0) % 8;
+        return dirs[index];
+    }
+
+    private void updateHunterTeamCompassSidebar(Player viewer) {
+        if (viewer == null || !viewer.isOnline()) return;
+        if (!hunters.contains(viewer.getUniqueId())) return;
+
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) return;
+
+        Scoreboard scoreboard = manager.getNewScoreboard();
+        Objective objective = scoreboard.registerNewObjective("teamcompass", "dummy", "§bHunter Team Compass");
+        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+
+        int score = Math.min(15, hunters.size() + 2);
+        objective.getScore("§7Name | Dir | Dist").setScore(score--);
+
+        for (UUID hunterId : hunters) {
+            Player hunter = Bukkit.getPlayer(hunterId);
+            String name = hunter != null ? hunter.getName() : "Offline";
+            if (name.length() > 10) name = name.substring(0, 10);
+
+            String dir;
+            String dist;
+            if (hunter == null || !hunter.isOnline()) {
+                dir = "--";
+                dist = "OFF";
+            } else {
+                Location tracked = resolveTrackingLocation(viewer, hunter);
+                if (tracked != null && tracked.getWorld() != null && viewer.getWorld().equals(tracked.getWorld())) {
+                    dir = getDirectionLabel(viewer.getLocation(), tracked);
+                    dist = Integer.toString((int) Math.round(viewer.getLocation().distance(tracked)));
+                } else {
+                    dir = "DIM";
+                    dist = hunter.getWorld().getEnvironment().name().substring(0, 1);
+                }
+            }
+
+            String line = "§f" + name + " §8| §e" + dir + " §8| §a" + dist + "§r" + (char) ('a' + (score % 26));
+            if (line.length() > 40) line = line.substring(0, 40);
+            objective.getScore(line).setScore(Math.max(score--, 1));
+            if (score <= 0) break;
+        }
+
+        viewer.setScoreboard(scoreboard);
+        teamCompassViewers.add(viewer.getUniqueId());
+    }
+
+    private void clearTeamCompassSidebar() {
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) return;
+        Scoreboard main = manager.getMainScoreboard();
+
+        for (UUID id : teamCompassViewers) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null && player.isOnline()) {
+                player.setScoreboard(main);
+            }
+        }
+        teamCompassViewers.clear();
+    }
+
+    private void startTeamCompassSidebar() {
+        stopTeamCompassSidebar();
+        if (!teamCompassEnabled) return;
+        if (!started) return;
+
+        teamCompassTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(this, () -> {
+            if (!started || !teamCompassEnabled) {
+                stopTeamCompassSidebar();
+                return;
+            }
+
+            for (UUID hunterId : hunters) {
+                Player viewer = Bukkit.getPlayer(hunterId);
+                if (viewer != null && viewer.isOnline()) {
+                    updateHunterTeamCompassSidebar(viewer);
+                }
+            }
+        }, 0L, 20L);
+    }
+
+    private void stopTeamCompassSidebar() {
+        if (teamCompassTaskId != -1) {
+            Bukkit.getScheduler().cancelTask(teamCompassTaskId);
+            teamCompassTaskId = -1;
+        }
+        clearTeamCompassSidebar();
+    }
+
+    private void clearAllAdvancements(Player player) {
+        Iterator<Advancement> advancements = Bukkit.advancementIterator();
+        while (advancements.hasNext()) {
+            Advancement advancement = advancements.next();
+            AdvancementProgress progress = player.getAdvancementProgress(advancement);
+            for (String criteria : progress.getAwardedCriteria()) {
+                progress.revokeCriteria(criteria);
+            }
+        }
+    }
+
+    private void prepareAllPlayersForStart() {
+        for (World world : Bukkit.getWorlds()) {
+            world.setGameRule(GameRule.LOCATOR_BAR, false);
+        }
+
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            online.getInventory().clear();
+            online.getInventory().setArmorContents(null);
+            online.getInventory().setExtraContents(null);
+            online.getInventory().setItemInOffHand(null);
+            online.updateInventory();
+
+            if (online.getAttribute(Attribute.MAX_HEALTH) != null) {
+                online.setHealth(online.getAttribute(Attribute.MAX_HEALTH).getValue());
+            }
+            online.setFoodLevel(20);
+            online.setSaturation(20f);
+            online.setFireTicks(0);
+            online.setFallDistance(0f);
+            online.removePotionEffect(PotionEffectType.SATURATION);
+            online.addPotionEffect(new PotionEffect(PotionEffectType.SATURATION, 200, 0, false, false, false));
+
+            clearAllAdvancements(online);
+        }
+    }
+
     public Boolean startManhunt(){
         waitingForStart = false;
         if (!started) {
+            prepareAllPlayersForStart();
             setStatus(true);
             startTimer();
+            playingSpeedrunners.clear();
             Bukkit.broadcastMessage("§aManhunt started!");
             playingSpeedrunners.addAll(speedrunners);
+            clearEliminatedSpeedrunners();
+            speedrunnerPortalTransitions.clear();
+            lastEliminatedSpeedrunnerLocation = null;
+            unfreezeHunters();
+            giveCompassesToAllHunters();
+            startHunterReleaseCountdown();
+            startTeamCompassSidebar();
             return true;
         }
         return false;
@@ -185,6 +517,11 @@ public final class ManhuntPlus extends JavaPlugin {
             setStatus(false);
             stopTimer();
             playingSpeedrunners.clear();
+            clearEliminatedSpeedrunners();
+            speedrunnerPortalTransitions.clear();
+            lastEliminatedSpeedrunnerLocation = null;
+            unfreezeHunters();
+            stopTeamCompassSidebar();
             Bukkit.broadcastMessage("§aManhunt stopped!");
             return true;
         }
@@ -211,6 +548,160 @@ public final class ManhuntPlus extends JavaPlugin {
     }
 
     // utils
+    private Player getDefaultTrackedSpeedrunner() {
+        for (UUID id : playingSpeedrunners) {
+            Player target = Bukkit.getPlayer(id);
+            if (target != null && target.isOnline()) {
+                return target;
+            }
+        }
+        return null;
+    }
+
+    private PortalTransition getLatestTransitionToEnv(Deque<PortalTransition> transitions, World.Environment env) {
+        Iterator<PortalTransition> itr = transitions.descendingIterator();
+        while (itr.hasNext()) {
+            PortalTransition transition = itr.next();
+            if (transition.toEnv == env) {
+                return transition;
+            }
+        }
+        return null;
+    }
+
+    private Location getFallbackPortalLocation(Deque<PortalTransition> transitions, World.Environment hunterEnv) {
+        Iterator<PortalTransition> itr = transitions.descendingIterator();
+        while (itr.hasNext()) {
+            PortalTransition transition = itr.next();
+            if (transition.fromEnv == hunterEnv) {
+                return transition.fromLocation.clone();
+            }
+        }
+
+        itr = transitions.descendingIterator();
+        while (itr.hasNext()) {
+            PortalTransition transition = itr.next();
+            if (transition.toEnv == hunterEnv) {
+                return transition.toLocation.clone();
+            }
+        }
+        return null;
+    }
+
+    public Location resolveTrackingLocation(Player hunter, Player target) {
+        if (target == null || !target.isOnline()) return null;
+        if (hunter == null || hunter.getWorld() == null || target.getWorld() == null) {
+            return target.getLocation();
+        }
+
+        World.Environment hunterEnv = hunter.getWorld().getEnvironment();
+        World.Environment targetEnv = target.getWorld().getEnvironment();
+        if (hunterEnv == targetEnv) {
+            return target.getLocation();
+        }
+
+        Deque<PortalTransition> transitions = speedrunnerPortalTransitions.get(target.getUniqueId());
+        if (transitions == null || transitions.isEmpty()) {
+            return target.getLocation();
+        }
+
+        Set<World.Environment> visited = new HashSet<>();
+        World.Environment cursor = targetEnv;
+        while (visited.add(cursor)) {
+            PortalTransition step = getLatestTransitionToEnv(transitions, cursor);
+            if (step == null) break;
+            if (step.fromEnv == hunterEnv) {
+                return step.fromLocation.clone();
+            }
+            cursor = step.fromEnv;
+        }
+
+        Location fallback = getFallbackPortalLocation(transitions, hunterEnv);
+        if (fallback != null) {
+            return fallback;
+        }
+        return target.getLocation();
+    }
+
+    public Player getNextPlayingSpeedrunner(UUID currentSpeedrunnerId) {
+        if (playingSpeedrunners.isEmpty()) return null;
+
+        int startIndex = speedrunners.indexOf(currentSpeedrunnerId);
+        if (startIndex < 0) return getDefaultTrackedSpeedrunner();
+
+        int total = speedrunners.size();
+        for (int i = 1; i <= total; i++) {
+            UUID candidateId = speedrunners.get((startIndex + i) % total);
+            if (!playingSpeedrunners.contains(candidateId)) continue;
+
+            Player candidate = Bukkit.getPlayer(candidateId);
+            if (candidate != null && candidate.isOnline()) {
+                return candidate;
+            }
+        }
+
+        return getDefaultTrackedSpeedrunner();
+    }
+
+    public void setLastEliminatedSpeedrunnerLocation(Location location) {
+        if (location == null) return;
+        lastEliminatedSpeedrunnerLocation = location.clone();
+    }
+
+    public void endManhuntWithAllSpeedrunnersEliminated() {
+        Location targetLocation = lastEliminatedSpeedrunnerLocation;
+        if (targetLocation != null) {
+            targetLocation = targetLocation.clone();
+        }
+
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (targetLocation != null) {
+                online.teleport(targetLocation);
+            }
+            online.setGameMode(GameMode.SPECTATOR);
+        }
+
+        stopManhunt();
+    }
+
+    public void giveDefaultCompassToHunter(Player hunter) {
+        if (hunter == null || !hunter.isOnline()) return;
+        if (!hunters.contains(hunter.getUniqueId())) return;
+
+        Player target = getDefaultTrackedSpeedrunner();
+        if (target == null) {
+            hunter.sendMessage("§cNo playing speedrunner is online to track.");
+            return;
+        }
+
+        giveCompass(target, hunter);
+    }
+
+    public void giveCompassesToAllHunters() {
+        for (UUID id : hunters) {
+            Player hunter = Bukkit.getPlayer(id);
+            if (hunter != null && hunter.isOnline()) {
+                giveDefaultCompassToHunter(hunter);
+            }
+        }
+    }
+
+    public void refreshCompassesForTarget(Player target) {
+        if (target == null || !target.isOnline()) return;
+
+        for (Map.Entry<UUID, Player> entry : trackedCompasses.entrySet()) {
+            UUID compassId = entry.getKey();
+            Player trackedTarget = entry.getValue();
+            if (trackedTarget == null || !trackedTarget.getUniqueId().equals(target.getUniqueId())) continue;
+
+            for (Player online : Bukkit.getOnlinePlayers()) {
+                for (ItemStack item : online.getInventory().getContents()) {
+                    updateCompass(item, compassId, target, online);
+                }
+            }
+        }
+    }
+
     public void giveCompass(Player target, Player player){
         if (!playingSpeedrunners.contains(target.getUniqueId())) {
             player.sendMessage("§cPlayer is not a playing speedrunner!");
@@ -269,7 +760,7 @@ public final class ManhuntPlus extends JavaPlugin {
 
                         for (Player p : Bukkit.getOnlinePlayers()) {
                             for (ItemStack item : p.getInventory().getContents()) {
-                                updateCompass(item, compassId, target);
+                                updateCompass(item, compassId, target, p);
                             }
                         }
                     }
@@ -282,6 +773,7 @@ public final class ManhuntPlus extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        stopTeamCompassSidebar();
         getLogger().info("Bye :(");
     }
 
@@ -311,11 +803,11 @@ public final class ManhuntPlus extends JavaPlugin {
             if (args.length == 2){
                 if (args[0].equalsIgnoreCase("add")){
                     Player target = Bukkit.getPlayer(args[1]);
-                    if (hunters.contains(target.getUniqueId())) {
+                    if (target != null && target.isOnline()) {
+                        if (hunters.contains(target.getUniqueId())) {
                         player.sendMessage("§cPlayer is a hunter!");
                         return true;
-                    }
-                    if (target != null && target.isOnline()) {
+                        }
                         if (!speedrunners.contains(target.getUniqueId())){
                             addSpeedrunner(target);
                             Bukkit.broadcastMessage("§a"+target.getName() + " is now a speedrunner!");
@@ -348,11 +840,11 @@ public final class ManhuntPlus extends JavaPlugin {
             if (args.length == 2){
                 if (args[0].equalsIgnoreCase("add")){
                     Player target = Bukkit.getPlayer(args[1]);
-                    if (speedrunners.contains(target.getUniqueId())) {
+                    if (target != null && target.isOnline()) {
+                        if (speedrunners.contains(target.getUniqueId())) {
                         player.sendMessage("§cPlayer is a speedrunner!");
                         return true;
-                    }
-                    if (target != null && target.isOnline()) {
+                        }
                         if (!hunters.contains(target.getUniqueId())){
                             addHunter(target);
                             Bukkit.broadcastMessage("§a"+target.getName() + " is now a hunter!");
@@ -397,7 +889,7 @@ public final class ManhuntPlus extends JavaPlugin {
             }
         } else if (cmd.getName().equalsIgnoreCase("manhunt")) {
             if (args.length == 0) {
-                player.sendMessage("§eUsage: /manhunt <start|stop|countdown|prepare|list|help>");
+                player.sendMessage("§eUsage: /manhunt <start|stop|countdown|startcountdown|teamcompass|prepare|list|help>");
                 return true;
             }
 
@@ -433,11 +925,55 @@ public final class ManhuntPlus extends JavaPlugin {
                         player.sendMessage("§eUse /manhunt countdown <minutes>, set minutes to 0 to disable");
                     }
                 }
+                case "startcountdown" -> {
+                    if (args.length == 2) {
+                        try {
+                            int secs = Integer.parseInt(args[1]);
+                            if (secs < 0) {
+                                player.sendMessage("§cCountdown must be 0 or higher.");
+                                return true;
+                            }
+                            setStartCountdownSeconds(secs);
+                            if (secs == 0) {
+                                player.sendMessage("§eHunter start countdown disabled.");
+                            } else {
+                                player.sendMessage("§aHunter start countdown set to " + secs + " second(s).");
+                            }
+                        } catch (NumberFormatException e) {
+                            player.sendMessage("§cInvalid number.");
+                        }
+                    } else {
+                        player.sendMessage("§eCurrent hunter start countdown: " + getStartCountdownSeconds() + " second(s).");
+                        player.sendMessage("§eUse /manhunt startcountdown <seconds>, set to 0 to disable");
+                    }
+                }
+                case "teamcompass" -> {
+                    if (started) {
+                        player.sendMessage("§cSet team compass before starting manhunt.");
+                        return true;
+                    }
+                    if (args.length == 2) {
+                        if (args[1].equalsIgnoreCase("on") || args[1].equalsIgnoreCase("true")) {
+                            setTeamCompassEnabled(true);
+                            player.sendMessage("§aTeam compass sidebar enabled.");
+                        } else if (args[1].equalsIgnoreCase("off") || args[1].equalsIgnoreCase("false")) {
+                            setTeamCompassEnabled(false);
+                            player.sendMessage("§eTeam compass sidebar disabled.");
+                        } else {
+                            player.sendMessage("§cUsage: /manhunt teamcompass <on|off>");
+                        }
+                    } else {
+                        player.sendMessage("§eTeam compass is currently " + (isTeamCompassEnabled() ? "enabled" : "disabled") + ".");
+                        player.sendMessage("§eUse /manhunt teamcompass <on|off>");
+                    }
+                }
                 case "help" -> {
                     player.sendMessage("To use our plugin start adding speedrunners with: /speedrunner add, use /speedrunner remove to remove a speedrunner");
                     player.sendMessage("You can then add the hunters using /hunter add & remove them using /hunter remove");
                     player.sendMessage("To start the manhunt run §e/manhunt start");
                     player.sendMessage("Manhunt countdown (max limit a manhunt can last in minutes) can be set using §e/manhunt cooldown");
+                    player.sendMessage("Freeze hunters at start with §e/manhunt startcountdown <seconds>");
+                    player.sendMessage("Show hunter teammate direction+distance with §e/manhunt teamcompass <on|off>");
                     player.sendMessage("Read full documentation on Modrinth/Discord/Website");
                 }
                 case "prepare" -> {
@@ -458,7 +994,7 @@ public final class ManhuntPlus extends JavaPlugin {
                         player.sendMessage(Bukkit.getPlayer(id).getName());
                     }
                 }
-                default -> player.sendMessage("§cUnknown subcommand. Use: start, stop, countdown");
+                default -> player.sendMessage("§cUnknown subcommand. Use: start, stop, countdown, startcountdown, teamcompass");
             }
 
             return true;
@@ -524,11 +1060,13 @@ public final class ManhuntPlus extends JavaPlugin {
             }
         } else if (cmd.getName().equalsIgnoreCase("manhunt")) {
             if (args.length == 1) {
-                return Stream.of("help","start", "stop", "countdown","prepare", "list")
+                return Stream.of("help","start", "stop", "countdown", "startcountdown", "teamcompass", "prepare", "list")
                         .filter(s -> s.startsWith(args[0].toLowerCase()))
                         .toList();
-            } else if (args.length == 2 && args[0].equalsIgnoreCase("countdown")) {
-                return List.of("0", "5", "10", "15", "30");
+            } else if (args.length == 2 && args[0].equalsIgnoreCase("teamcompass")) {
+                return List.of("on", "off");
+            } else if (args.length == 2 && (args[0].equalsIgnoreCase("countdown") || args[0].equalsIgnoreCase("startcountdown"))) {
+                return List.of("0", "5", "10", "15", "30", "60");
             }
         }
         return Collections.emptyList();
@@ -536,3 +1074,5 @@ public final class ManhuntPlus extends JavaPlugin {
 
 
 }
+
+

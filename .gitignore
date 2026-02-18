@@ -1,1 +1,23 @@
+# Runtime
 /run/
+
+# Gradle
+.gradle/
+.gradle-user-home/
+build/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+build-output.log
+
+# Java
+out/

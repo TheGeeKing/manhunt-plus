@@ -3,15 +3,20 @@ package net.tutla.manhuntPlus;
 import net.tutla.manhuntPlus.lootpool.LootPool;
 import org.bukkit.*;
 import org.bukkit.entity.EntityType;
-import org.bukkit.event.Listener;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -20,7 +25,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.Vector;
 
-import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
@@ -30,21 +34,111 @@ public class EventListeners implements Listener {
     private static TwistsHelper helper;
 
     public EventListeners(TwistsHelper helper) {
-        this.helper = helper;
+        EventListeners.helper = helper;
     }
 
     @EventHandler
-    public void onDeath(PlayerDeathEvent event){
+    public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
-        if (ManhuntPlus.getInstance().getPlayingSpeedrunners().contains(player.getUniqueId())){
-            Bukkit.broadcastMessage("Speedrunner "+player.getName()+" has been eliminated");
-            ManhuntPlus.getInstance().removePlayingSpeedrunner(player);
-            if (ManhuntPlus.getInstance().getPlayingSpeedrunners().isEmpty()){
-                Bukkit.broadcastMessage("§aHunter(s) have won the Manhunt!");
-                ManhuntPlus.getInstance().stopManhunt();
+        Location lastLocation = player.getLocation().clone();
+        if (!ManhuntPlus.getInstance().getPlayingSpeedrunners().contains(player.getUniqueId())) return;
+
+        Bukkit.broadcastMessage("Speedrunner " + player.getName() + " has been eliminated");
+        ManhuntPlus.getInstance().setLastEliminatedSpeedrunnerLocation(lastLocation);
+        ManhuntPlus.getInstance().markSpeedrunnerEliminated(player);
+        ManhuntPlus.getInstance().setEliminatedSpeedrunnerDeathLocation(player.getUniqueId(), lastLocation);
+        ManhuntPlus.getInstance().removePlayingSpeedrunner(player);
+
+        boolean allSpeedrunnersEliminated = ManhuntPlus.getInstance().getPlayingSpeedrunners().isEmpty();
+        Bukkit.getScheduler().runTaskLater(ManhuntPlus.getInstance(), () -> {
+            if (player.isOnline()) {
+                player.spigot().respawn();
             }
-        }
+
+            if (allSpeedrunnersEliminated) {
+                Bukkit.broadcastMessage("§aHunter(s) have won the Manhunt!");
+                ManhuntPlus.getInstance().endManhuntWithAllSpeedrunnersEliminated();
+            }
+        }, 1L);
     }
+
+    @EventHandler
+    public void onRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        if (!ManhuntPlus.getInstance().getStatus()) return;
+
+        if (ManhuntPlus.getInstance().getHunters().contains(player.getUniqueId())) {
+            Bukkit.getScheduler().runTaskLater(ManhuntPlus.getInstance(), () -> {
+                ManhuntPlus.getInstance().giveDefaultCompassToHunter(player);
+                ManhuntPlus.getInstance().markHunterRespawnDuringFreeze(player);
+            }, 1L);
+            return;
+        }
+
+        if (!ManhuntPlus.getInstance().getSpeedrunners().contains(player.getUniqueId())) return;
+        if (!ManhuntPlus.getInstance().isEliminatedSpeedrunner(player.getUniqueId())) return;
+
+        Bukkit.getScheduler().runTaskLater(ManhuntPlus.getInstance(), () -> {
+            player.setGameMode(GameMode.SPECTATOR);
+            Location deathLocation = ManhuntPlus.getInstance().getEliminatedSpeedrunnerDeathLocation(player.getUniqueId());
+            if (deathLocation != null) {
+                player.teleport(deathLocation);
+            }
+            startEliminatedSpeedrunnerCountdown(player);
+        }, 1L);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPortalTravel(PlayerTeleportEvent event) {
+        if (!ManhuntPlus.getInstance().getStatus()) return;
+        if (event.getTo() == null) return;
+        if (event.getCause() != PlayerTeleportEvent.TeleportCause.NETHER_PORTAL
+                && event.getCause() != PlayerTeleportEvent.TeleportCause.END_PORTAL) {
+            return;
+        }
+
+        Player player = event.getPlayer();
+        boolean trackedRole = ManhuntPlus.getInstance().getPlayingSpeedrunners().contains(player.getUniqueId())
+                || ManhuntPlus.getInstance().getHunters().contains(player.getUniqueId());
+        if (!trackedRole) return;
+        ManhuntPlus.getInstance().recordSpeedrunnerPortalTransition(player, event.getFrom(), event.getTo());
+        ManhuntPlus.getInstance().refreshCompassesForTarget(player);
+    }
+
+    private void startEliminatedSpeedrunnerCountdown(Player player) {
+        final int[] secondsLeft = {10};
+
+        new org.bukkit.scheduler.BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!player.isOnline()) {
+                    cancel();
+                    return;
+                }
+
+                if (!ManhuntPlus.getInstance().getStatus()) {
+                    cancel();
+                    return;
+                }
+
+                if (secondsLeft[0] > 0) {
+                    player.sendTitle("§7You were eliminated", "§eTeleporting in " + secondsLeft[0] + "s", 0, 25, 0);
+                    secondsLeft[0]--;
+                    return;
+                }
+
+                Player target = ManhuntPlus.getInstance().getNextPlayingSpeedrunner(player.getUniqueId());
+                if (target != null && target.isOnline()) {
+                    player.teleport(target.getLocation());
+                    player.sendTitle("§aTeleported", "§7Now spectating " + target.getName(), 5, 35, 10);
+                } else {
+                    player.sendMessage("§cNo active speedrunner is online to spectate.");
+                }
+                cancel();
+            }
+        }.runTaskTimer(ManhuntPlus.getInstance(), 0L, 20L);
+    }
+
     @EventHandler
     public void onEntityDeath(EntityDeathEvent event) {
         if (event.getEntityType() == EntityType.PIG) {
@@ -63,12 +157,13 @@ public class EventListeners implements Listener {
                 if (drop != null) event.getDrops().add(drop);
             }
         } else if (event.getEntityType() == EntityType.ENDER_DRAGON) {
-            if (ManhuntPlus.getInstance().getStatus() && !(ManhuntPlus.getInstance().getPlayingSpeedrunners().isEmpty())){
+            if (ManhuntPlus.getInstance().getStatus() && !(ManhuntPlus.getInstance().getPlayingSpeedrunners().isEmpty())) {
                 Bukkit.broadcastMessage("§aSpeedrunner(s) have won the Manhunt!");
                 ManhuntPlus.getInstance().stopManhunt();
             }
         }
     }
+
     @EventHandler
     public void onPlayerInteractEntity(PlayerInteractEntityEvent event) {
 
@@ -86,7 +181,7 @@ public class EventListeners implements Listener {
 
             NamespacedKey key = new NamespacedKey(ManhuntPlus.getInstance(), "milked_from");
             meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, target.getUniqueId().toString());
-            meta.setDisplayName("§b" + target.getName()+ "§e's Milk");
+            meta.setDisplayName("§b" + target.getName() + "§e's Milk");
             milk.setItemMeta(meta);
             player.getInventory().addItem(milk);
 
@@ -115,7 +210,11 @@ public class EventListeners implements Listener {
         if (id == null) return;
         UUID compassId = UUID.fromString(id);
         Player target = ManhuntPlus.getInstance().getTrackedCompasses().get(compassId);
-        ManhuntPlus.updateCompass(item, compassId, target);
+        if (target == null || !target.isOnline()) {
+            event.getPlayer().sendMessage("§cTracked player is not available.");
+            return;
+        }
+        ManhuntPlus.updateCompass(item, compassId, target, event.getPlayer());
 
         event.getPlayer().sendMessage("§aCompass calibrated to " + target.getName());
     }
@@ -141,18 +240,51 @@ public class EventListeners implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent event) {
         if (!(event.getDamager() instanceof Player)) return;
         if (!(event.getEntity() instanceof Player)) return;
 
         Player hitter = (Player) event.getDamager();
         Player victim = (Player) event.getEntity();
-        if (ManhuntPlus.getInstance().getSpeedrunners().contains(hitter.getUniqueId()) && ManhuntPlus.getInstance().getHunters().contains(victim.getUniqueId())){
-            if (ManhuntPlus.getInstance().waitingForStart){
+        if (ManhuntPlus.getInstance().getSpeedrunners().contains(hitter.getUniqueId()) && ManhuntPlus.getInstance().getHunters().contains(victim.getUniqueId())) {
+            if (ManhuntPlus.getInstance().waitingForStart) {
                 ManhuntPlus.getInstance().startManhunt();
             }
         }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onHunterMove(PlayerMoveEvent event) {
+        if (!ManhuntPlus.getInstance().getStatus()) return;
+        if (!ManhuntPlus.getInstance().areHuntersFrozen()) return;
+
+        Player player = event.getPlayer();
+        if (!ManhuntPlus.getInstance().getHunters().contains(player.getUniqueId())) return;
+        if (ManhuntPlus.getInstance().isHunterRespawnExempt(player.getUniqueId())) return;
+        if (event.getTo() == null) return;
+
+        if (event.getFrom().getX() == event.getTo().getX()
+                && event.getFrom().getY() == event.getTo().getY()
+                && event.getFrom().getZ() == event.getTo().getZ()) {
+            return;
+        }
+
+        Location locked = event.getFrom().clone();
+        locked.setYaw(event.getTo().getYaw());
+        locked.setPitch(event.getTo().getPitch());
+        event.setTo(locked);
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onHunterDamageDuringStartCountdown(EntityDamageEvent event) {
+        if (!ManhuntPlus.getInstance().getStatus()) return;
+        if (!ManhuntPlus.getInstance().areHuntersFrozen()) return;
+        if (!(event.getEntity() instanceof Player hunter)) return;
+        if (!ManhuntPlus.getInstance().getHunters().contains(hunter.getUniqueId())) return;
+        if (ManhuntPlus.getInstance().isHunterRespawnExempt(hunter.getUniqueId())) return;
+
+        event.setCancelled(true);
     }
 
     /*@EventHandler
