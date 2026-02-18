@@ -34,3 +34,7 @@ commands:
     description: Surround a speedrunner with hunters
     usage: /<command> <player>
     permission: permission.node
+  randomvillage:
+    description: Teleport near the nearest random village type
+    usage: /<command>
+    permission: permission.node

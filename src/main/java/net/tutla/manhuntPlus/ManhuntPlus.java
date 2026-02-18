@@ -18,6 +18,7 @@ import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.generator.structure.Structure;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.CompassMeta;
 import org.bukkit.potion.PotionEffect;
@@ -27,6 +28,8 @@ import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
+import org.bukkit.Registry;
+import org.bukkit.util.StructureSearchResult;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -735,6 +738,37 @@ public final class ManhuntPlus extends JavaPlugin {
         }
     }
 
+    private Location getSafeVillageTeleport(World world, Location villageCenter) {
+        if (world == null || villageCenter == null) return null;
+        int[] offsets = {6, -6, 10, -10};
+        for (int xOffset : offsets) {
+            for (int zOffset : offsets) {
+                int x = villageCenter.getBlockX() + xOffset;
+                int z = villageCenter.getBlockZ() + zOffset;
+                int y = world.getHighestBlockYAt(x, z) + 1;
+                Location candidate = new Location(world, x + 0.5, y, z + 0.5);
+                if (candidate.getBlock().getType().isAir() && candidate.clone().add(0, 1, 0).getBlock().getType().isAir()) {
+                    return candidate;
+                }
+            }
+        }
+        int fallbackY = world.getHighestBlockYAt(villageCenter) + 1;
+        return new Location(world, villageCenter.getX() + 0.5, fallbackY, villageCenter.getZ() + 0.5);
+    }
+
+    private List<Map.Entry<String, Structure>> getVillageStructures() {
+        return Registry.STRUCTURE.stream()
+                .map(structure -> {
+                    NamespacedKey key = Registry.STRUCTURE.getKey(structure);
+                    if (key == null) return null;
+                    if (!"minecraft".equals(key.getNamespace())) return null;
+                    if (!key.getKey().startsWith("village_")) return null;
+                    return Map.entry(key.getKey(), structure);
+                })
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
 
     // actual shi
     @Override
@@ -1038,6 +1072,28 @@ public final class ManhuntPlus extends JavaPlugin {
                 return true;
             }
 
+        } else if (cmd.getName().equalsIgnoreCase("randomvillage")) {
+            List<Map.Entry<String, Structure>> villageStructures = getVillageStructures();
+            if (villageStructures.isEmpty()) {
+                player.sendMessage("§cNo village structures found in the structure registry.");
+                return true;
+            }
+            Map.Entry<String, Structure> selectedVillage = villageStructures.get(new Random().nextInt(villageStructures.size()));
+            String villageKey = selectedVillage.getKey();
+            Structure randomVillage = selectedVillage.getValue();
+
+            World world = player.getWorld();
+            StructureSearchResult nearestVillage = world.locateNearestStructure(player.getLocation(), randomVillage, 512, false);
+            if (nearestVillage == null) {
+                player.sendMessage("§cCouldn't find a " + villageKey.replace('_', ' ') + " nearby.");
+                return true;
+            }
+
+            Location teleportLocation = getSafeVillageTeleport(world, nearestVillage.getLocation());
+            player.teleport(teleportLocation);
+            String villageName = villageKey.replace("village_", "").toLowerCase(Locale.ROOT);
+            player.sendMessage("§aTeleported near the nearest §e" + villageName + " §avillage.");
+            return true;
         }
 
         return false;
