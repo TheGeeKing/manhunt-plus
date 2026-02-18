@@ -40,6 +40,7 @@ public final class ManhuntPlusPlugin extends JavaPlugin {
         RoleService roleService = new RoleService(state);
         CompassService compassService = new CompassService(this, state);
         sidebarService = new SidebarService(this, state, pluginConfig.getSettings(), compassService);
+        sidebarService.startPregameSidebar();
         freezeService = new FreezeService(this, state, pluginConfig.getSettings());
         TwistService twistService = new TwistService(this, state);
         MatchService matchService = new MatchService(this, state, pluginConfig.getSettings(), roleService, compassService, freezeService, sidebarService);
@@ -77,7 +78,7 @@ public final class ManhuntPlusPlugin extends JavaPlugin {
             freezeService.stopHunterFreeze();
         }
         if (sidebarService != null) {
-            sidebarService.stop();
+            sidebarService.shutdown();
         }
         getLogger().info("ManhuntPlus disabled.");
     }

@@ -3,6 +3,7 @@ package net.tutla.manhuntPlus.application;
 import net.tutla.manhuntPlus.domain.GameState;
 import net.tutla.manhuntPlus.domain.MatchPhase;
 import net.tutla.manhuntPlus.domain.MatchSettings;
+import org.bukkit.ChatColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -13,14 +14,27 @@ import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public final class SidebarService {
+    private static final ChatColor[] NONCE_COLORS = {
+            ChatColor.BLACK, ChatColor.DARK_BLUE, ChatColor.DARK_GREEN, ChatColor.DARK_AQUA,
+            ChatColor.DARK_RED, ChatColor.DARK_PURPLE, ChatColor.GOLD, ChatColor.GRAY,
+            ChatColor.DARK_GRAY, ChatColor.BLUE, ChatColor.GREEN, ChatColor.AQUA,
+            ChatColor.RED, ChatColor.LIGHT_PURPLE, ChatColor.YELLOW, ChatColor.WHITE
+    };
+
     private final JavaPlugin plugin;
     private final GameState state;
     private final MatchSettings settings;
     private final CompassService compassService;
     private BukkitTask task;
+    private BukkitTask pregameTask;
+    private final Set<UUID> pregameSidebarViewers = new HashSet<>();
 
     public SidebarService(JavaPlugin plugin, GameState state, MatchSettings settings, CompassService compassService) {
         this.plugin = plugin;
@@ -50,6 +64,21 @@ public final class SidebarService {
             }
             for (UUID id : state.getHunters()) {
                 updateHunterSidebar(id);
+            }
+        }, 0L, 20L);
+    }
+
+    public void startPregameSidebar() {
+        if (pregameTask != null) {
+            return;
+        }
+        pregameTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            if (state.getPhase() == MatchPhase.RUNNING) {
+                clearPregameSidebars();
+                return;
+            }
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                updatePregameSidebar(player);
             }
         }, 0L, 20L);
     }
@@ -104,15 +133,72 @@ public final class SidebarService {
         state.getTeamCompassViewers().add(viewerId);
     }
 
+    public void updatePregameSidebar(Player viewer) {
+        if (viewer == null || !viewer.isOnline()) {
+            return;
+        }
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) {
+            return;
+        }
+
+        List<String> speedrunners = new ArrayList<>();
+        List<String> hunters = new ArrayList<>();
+        List<String> unassigned = new ArrayList<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (!player.isOnline()) {
+                continue;
+            }
+            UUID id = player.getUniqueId();
+            if (state.getSpeedrunners().contains(id)) {
+                speedrunners.add(player.getName());
+            } else if (state.getHunters().contains(id)) {
+                hunters.add(player.getName());
+            } else {
+                unassigned.add(player.getName());
+            }
+        }
+        speedrunners.sort(String.CASE_INSENSITIVE_ORDER);
+        hunters.sort(String.CASE_INSENSITIVE_ORDER);
+        unassigned.sort(String.CASE_INSENSITIVE_ORDER);
+
+        Scoreboard scoreboard = manager.getNewScoreboard();
+        Objective objective = scoreboard.registerNewObjective("teamsetup", "dummy", "§6Team Setup");
+        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+
+        List<String> rows = new ArrayList<>();
+        appendSectionRows(rows, "§aSpeedrunners", speedrunners);
+        appendSectionRows(rows, "§cHunters", hunters);
+        appendSectionRows(rows, "§eUnassigned", unassigned);
+
+        int score = Math.min(rows.size(), 15);
+        int nonce = 0;
+        for (int i = 0; i < score; i++) {
+            String row = withNonce(rows.get(i), nonce++);
+            objective.getScore(row).setScore(score - i);
+        }
+        viewer.setScoreboard(scoreboard);
+        pregameSidebarViewers.add(viewer.getUniqueId());
+    }
+
     public void stop() {
         if (task != null) {
             task.cancel();
             task = null;
         }
-        clearAll();
+        clearTeamCompassSidebars();
     }
 
-    public void clearAll() {
+    public void shutdown() {
+        stop();
+        if (pregameTask != null) {
+            pregameTask.cancel();
+            pregameTask = null;
+        }
+        clearPregameSidebars();
+    }
+
+    public void clearTeamCompassSidebars() {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
         if (manager == null) {
             return;
@@ -125,6 +211,21 @@ public final class SidebarService {
             }
         }
         state.getTeamCompassViewers().clear();
+    }
+
+    public void clearPregameSidebars() {
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) {
+            return;
+        }
+        Scoreboard main = manager.getMainScoreboard();
+        for (UUID id : pregameSidebarViewers) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null && player.isOnline()) {
+                player.setScoreboard(main);
+            }
+        }
+        pregameSidebarViewers.clear();
     }
 
     private String direction(Location from, Location to) {
@@ -158,5 +259,31 @@ public final class SidebarService {
             visible++;
         }
         return result.toString();
+    }
+
+    private void appendSectionRows(List<String> rows, String header, List<String> players) {
+        if (rows.size() >= 15) {
+            return;
+        }
+        rows.add(header);
+        if (rows.size() >= 15) {
+            return;
+        }
+        if (players.isEmpty()) {
+            rows.add("§8- none");
+            return;
+        }
+        for (String player : players) {
+            if (rows.size() >= 15) {
+                break;
+            }
+            rows.add("§f- " + player);
+        }
+    }
+
+    private String withNonce(String row, int nonce) {
+        ChatColor first = NONCE_COLORS[nonce % NONCE_COLORS.length];
+        ChatColor second = NONCE_COLORS[(nonce / NONCE_COLORS.length) % NONCE_COLORS.length];
+        return truncateColored(row, 40) + first + second;
     }
 }
