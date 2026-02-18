@@ -32,7 +32,7 @@ final class CommandSupport {
 
     static List<String> tab(String input, String... values) {
         String lower = input.toLowerCase(Locale.ROOT);
-        return Arrays.stream(values).filter(s -> s.startsWith(lower)).toList();
+        return Arrays.stream(values).filter(s -> s.toLowerCase(Locale.ROOT).startsWith(lower)).toList();
     }
 
     static List<String> onlinePlayers(String prefix) {
@@ -49,6 +49,6 @@ final class CommandSupport {
 
     static List<String> streamTab(String input, Stream<String> values) {
         String lower = input.toLowerCase(Locale.ROOT);
-        return values.filter(s -> s.startsWith(lower)).toList();
+        return values.filter(s -> s.toLowerCase(Locale.ROOT).startsWith(lower)).toList();
     }
 }

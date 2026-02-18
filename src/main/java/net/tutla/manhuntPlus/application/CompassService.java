@@ -139,6 +139,26 @@ public final class CompassService {
         return readCompassId(item) != null;
     }
 
+    public boolean untrackCompass(ItemStack item) {
+        UUID compassId = readCompassId(item);
+        if (compassId == null) {
+            return false;
+        }
+        return state.getTrackedCompasses().remove(compassId) != null;
+    }
+
+    public boolean playerHasTrackingCompass(Player player) {
+        if (player == null) {
+            return false;
+        }
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (isTrackingCompass(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public Location resolveTrackingLocation(Player holder, Player target) {
         if (holder == null || target == null || !target.isOnline()) {
             return null;

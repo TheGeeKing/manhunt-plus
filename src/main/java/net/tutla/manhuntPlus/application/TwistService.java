@@ -16,11 +16,13 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
@@ -82,14 +84,16 @@ public final class TwistService {
             meta.setDisplayName("§b" + hunter.getName() + "§e's Milk");
             milk.setItemMeta(meta);
         }
-        speedrunner.getInventory().addItem(milk);
-
         ItemStack hand = speedrunner.getInventory().getItemInMainHand();
-        if (hand.getAmount() > 1) {
+        if (hand.getAmount() == 1) {
+            speedrunner.getInventory().setItemInMainHand(milk);
+        } else {
+            Map<Integer, ItemStack> leftover = speedrunner.getInventory().addItem(milk);
+            if (!leftover.isEmpty()) {
+                return false;
+            }
             hand.setAmount(hand.getAmount() - 1);
             speedrunner.getInventory().setItemInMainHand(hand);
-        } else {
-            speedrunner.getInventory().setItemInMainHand(null);
         }
 
         hunter.sendMessage(Messages.error("You have been milked!"));
@@ -136,15 +140,34 @@ public final class TwistService {
     }
 
     private void createSinkhole(Player player) {
-        var world = player.getWorld();
-        var loc = player.getLocation();
-        for (int y = loc.getBlockY(); y >= world.getMinHeight(); y--) {
-            for (int x = -1; x <= 1; x++) {
-                for (int z = -1; z <= 1; z++) {
-                    world.getBlockAt(loc.getBlockX() + x, y, loc.getBlockZ() + z).setType(Material.AIR);
+        final var world = player.getWorld();
+        final var loc = player.getLocation();
+        final int originX = loc.getBlockX();
+        final int originZ = loc.getBlockZ();
+        final int minY = world.getMinHeight();
+        final int[] nextY = {loc.getBlockY()};
+        final int yLevelsPerTick = 20;
+
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (nextY[0] < minY) {
+                    cancel();
+                    return;
                 }
+
+                int endY = Math.max(minY, nextY[0] - (yLevelsPerTick - 1));
+                for (int y = nextY[0]; y >= endY; y--) {
+                    for (int x = -1; x <= 1; x++) {
+                        for (int z = -1; z <= 1; z++) {
+                            world.getBlockAt(originX + x, y, originZ + z).setType(Material.AIR, false);
+                        }
+                    }
+                }
+
+                nextY[0] = endY - 1;
             }
-        }
+        }.runTaskTimer(plugin, 0L, 1L);
     }
 
     private void clearHalfInventory(Player player) {

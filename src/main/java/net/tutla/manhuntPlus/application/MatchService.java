@@ -50,13 +50,13 @@ public final class MatchService {
     }
 
     public boolean start(Location startLocation) {
-        state.setWaitingForStart(false);
         if (state.getPhase() == MatchPhase.RUNNING) {
             return false;
         }
         if (state.getSpeedrunners().isEmpty() || state.getHunters().isEmpty()) {
             return false;
         }
+        state.setWaitingForStart(false);
 
         if (startLocation != null && startLocation.getWorld() != null) {
             startLocation.getWorld().setSpawnLocation(startLocation);
@@ -89,7 +89,6 @@ public final class MatchService {
         freezeService.stopHunterFreeze();
         sidebarService.stop();
         state.clearRoundState();
-        state.setPhase(MatchPhase.ENDED);
         state.setPhase(MatchPhase.IDLE);
 
         String msg = switch (reason) {

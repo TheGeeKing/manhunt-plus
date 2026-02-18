@@ -19,7 +19,7 @@
 
 #### 🧪 Extras
 
-- `/manhunt prepare` – Wait for first speedrunner hit to start
+- `/manhunt prepare` – Wait for the first hit on a speedrunner before starting
 - `/surround <speedrunner>` – Surround the speedrunner with all hunters
 - `/randomvillage` – Teleport near the nearest random village type
 
@@ -47,10 +47,10 @@
 
 - Calibration
   - `auto-calibration`: Enable/Disable auto compass calibration
-  - `auto-calibration-interval` - Set the interval on which the compass updates. Recommended to increase this if used on larger servers or even completely disable it, restart server to apply changes
+  - `auto-calibration-interval`: Set the interval on which the compass updates. Recommended to increase this value on larger servers, or completely disable it. Restart the server to apply changes.
 - Broadcasting
   - `broadcast-time`: true
-  - `broadcast-time-every` - Broadcast time interval(in seconds)
+  - `broadcast-time-every`: Broadcast time interval (in seconds)
 - `surround-radius: DECIMAL` – Distance between speedrunner and hunters when using `/surround`. Default: `3`
 - `name-tracking-compass`: Name the compass to which player its tracking
 

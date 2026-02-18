@@ -86,7 +86,9 @@ public final class GameState {
     }
 
     public void decrementHuntersFreezeSecondsRemaining() {
-        this.huntersFreezeSecondsRemaining--;
+        if (huntersFreezeSecondsRemaining > 0) {
+            this.huntersFreezeSecondsRemaining--;
+        }
     }
 
     public Set<UUID> getFreezeRespawnExemptHunters() {

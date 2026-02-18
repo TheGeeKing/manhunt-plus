@@ -5,6 +5,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 
@@ -49,15 +50,15 @@ public final class RoleService {
     }
 
     public Set<UUID> speedrunners() {
-        return state.getSpeedrunners();
+        return Collections.unmodifiableSet(state.getSpeedrunners());
     }
 
     public Set<UUID> hunters() {
-        return state.getHunters();
+        return Collections.unmodifiableSet(state.getHunters());
     }
 
     public Set<UUID> activeSpeedrunners() {
-        return state.getActiveSpeedrunners();
+        return Collections.unmodifiableSet(state.getActiveSpeedrunners());
     }
 
     public Player firstOnlineSpeedrunner() {

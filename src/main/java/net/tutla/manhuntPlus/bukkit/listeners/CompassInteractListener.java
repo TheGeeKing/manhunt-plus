@@ -32,6 +32,9 @@ public final class CompassInteractListener implements Listener {
             return;
         }
         ItemStack item = event.getItem();
+        if (item == null) {
+            return;
+        }
         UUID compassId = compassService.readCompassId(item);
         if (compassId == null) {
             return;

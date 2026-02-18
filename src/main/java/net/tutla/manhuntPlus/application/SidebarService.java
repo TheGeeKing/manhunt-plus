@@ -94,9 +94,7 @@ public final class SidebarService {
             }
 
             String row = "§f" + name + " §8| §e" + direction + " §8| §a" + distance + "§r" + (char) ('a' + (score % 26));
-            if (row.length() > 40) {
-                row = row.substring(0, 40);
-            }
+            row = truncateColored(row, 40);
             objective.getScore(row).setScore(Math.max(score--, 1));
             if (score <= 0) {
                 break;
@@ -142,5 +140,23 @@ public final class SidebarService {
         String[] dirs = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
         int idx = (int) Math.round(angle / 45d) % 8;
         return dirs[idx];
+    }
+
+    private String truncateColored(String input, int maxLen) {
+        StringBuilder result = new StringBuilder();
+        int visible = 0;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '§' && i + 1 < input.length()) {
+                result.append(c).append(input.charAt(++i));
+                continue;
+            }
+            if (visible >= maxLen) {
+                break;
+            }
+            result.append(c);
+            visible++;
+        }
+        return result.toString();
     }
 }

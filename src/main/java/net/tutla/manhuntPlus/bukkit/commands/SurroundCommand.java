@@ -13,8 +13,6 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
-import java.util.UUID;
-
 public final class SurroundCommand implements CommandExecutor, TabCompleter {
     private final RoleService roleService;
     private final MatchSettings settings;
@@ -49,20 +47,20 @@ public final class SurroundCommand implements CommandExecutor, TabCompleter {
             player.sendMessage(Messages.error("Player is not a speedrunner."));
             return true;
         }
-        int count = roleService.hunters().size();
-        if (count == 0) {
+        List<Player> onlineHunters = roleService.hunters().stream()
+                .map(Bukkit::getPlayer)
+                .filter(hunter -> hunter != null && hunter.isOnline())
+                .toList();
+        if (onlineHunters.isEmpty()) {
             player.sendMessage(Messages.error("No hunters set."));
             return true;
         }
 
         Location center = target.getLocation();
         double radius = settings.getSurroundRadius();
+        int count = onlineHunters.size();
         int idx = 0;
-        for (UUID hunterId : roleService.hunters()) {
-            Player hunter = Bukkit.getPlayer(hunterId);
-            if (hunter == null || !hunter.isOnline()) {
-                continue;
-            }
+        for (Player hunter : onlineHunters) {
             double angle = 2 * Math.PI * idx++ / count;
             double xOffset = radius * Math.cos(angle);
             double zOffset = radius * Math.sin(angle);

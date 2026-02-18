@@ -23,9 +23,13 @@ public final class PlayerDeathListener implements Listener {
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
-        if (state.getHunters().contains(player.getUniqueId())) {
-            event.getDrops().removeIf(compassService::isTrackingCompass);
-        }
+        event.getDrops().removeIf(item -> {
+            if (!compassService.isTrackingCompass(item)) {
+                return false;
+            }
+            compassService.untrackCompass(item);
+            return true;
+        });
         if (state.getPhase() != MatchPhase.RUNNING || !state.getActiveSpeedrunners().contains(player.getUniqueId())) {
             return;
         }

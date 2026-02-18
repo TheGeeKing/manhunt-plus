@@ -13,6 +13,7 @@ import net.tutla.manhuntPlus.bukkit.commands.RandomVillageCommand;
 import net.tutla.manhuntPlus.bukkit.commands.SpeedrunnerCommand;
 import net.tutla.manhuntPlus.bukkit.commands.SurroundCommand;
 import net.tutla.manhuntPlus.bukkit.commands.TwistCommand;
+import net.tutla.manhuntPlus.bukkit.listeners.CompassLifecycleListener;
 import net.tutla.manhuntPlus.bukkit.listeners.CompassInteractListener;
 import net.tutla.manhuntPlus.bukkit.listeners.FreezeEnforcementListener;
 import net.tutla.manhuntPlus.bukkit.listeners.PlayerDeathListener;
@@ -55,6 +56,7 @@ public final class ManhuntPlusPlugin extends JavaPlugin {
         registerListener(new PlayerRespawnListener(this, state, roleService, compassService, freezeService));
         registerListener(new PortalListener(state, compassService));
         registerListener(new CompassInteractListener(compassService, state));
+        registerListener(new CompassLifecycleListener(this, state, compassService));
         registerListener(new FreezeEnforcementListener(state, freezeService, matchService));
         registerListener(new TwistListener(state, twistService, matchService));
 

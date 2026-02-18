@@ -22,6 +22,9 @@ public final class AutoCalibrationTask {
         task = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             Bukkit.getOnlinePlayers().forEach(player -> {
                 for (ItemStack item : player.getInventory().getContents()) {
+                    if (item == null) {
+                        continue;
+                    }
                     compassService.refreshItem(item, player);
                 }
             });
