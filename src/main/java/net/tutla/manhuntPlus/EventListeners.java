@@ -41,6 +41,9 @@ public class EventListeners implements Listener {
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         Location lastLocation = player.getLocation().clone();
+        if (ManhuntPlus.getInstance().getHunters().contains(player.getUniqueId())) {
+            event.getDrops().removeIf(this::isTrackingCompass);
+        }
         if (!ManhuntPlus.getInstance().getPlayingSpeedrunners().contains(player.getUniqueId())) return;
 
         Bukkit.broadcastMessage("Speedrunner " + player.getName() + " has been eliminated");
@@ -60,6 +63,13 @@ public class EventListeners implements Listener {
                 ManhuntPlus.getInstance().endManhuntWithAllSpeedrunnersEliminated();
             }
         }, 1L);
+    }
+
+    private boolean isTrackingCompass(ItemStack item) {
+        if (item == null || item.getType() != Material.COMPASS) return false;
+        if (!(item.getItemMeta() instanceof CompassMeta meta)) return false;
+        String id = meta.getPersistentDataContainer().get(ManhuntPlus.COMPASS_ID_KEY, PersistentDataType.STRING);
+        return id != null && !id.isBlank();
     }
 
     @EventHandler
