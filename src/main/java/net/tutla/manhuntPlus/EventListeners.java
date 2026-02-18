@@ -108,11 +108,18 @@ public class EventListeners implements Listener {
         }
 
         Player player = event.getPlayer();
-        boolean trackedRole = ManhuntPlus.getInstance().getPlayingSpeedrunners().contains(player.getUniqueId())
-                || ManhuntPlus.getInstance().getHunters().contains(player.getUniqueId());
-        if (!trackedRole) return;
-        ManhuntPlus.getInstance().recordSpeedrunnerPortalTransition(player, event.getFrom(), event.getTo());
-        ManhuntPlus.getInstance().refreshCompassesForTarget(player);
+        boolean isSpeedrunner = ManhuntPlus.getInstance().getPlayingSpeedrunners().contains(player.getUniqueId());
+        boolean isHunter = ManhuntPlus.getInstance().getHunters().contains(player.getUniqueId());
+        if (!isSpeedrunner && !isHunter) return;
+
+        if (isSpeedrunner) {
+            ManhuntPlus.getInstance().recordSpeedrunnerPortalTransition(player, event.getFrom(), event.getTo());
+            ManhuntPlus.getInstance().refreshCompassesForTarget(player);
+        }
+
+        if (isHunter) {
+            ManhuntPlus.getInstance().refreshCompassesForHolder(player);
+        }
     }
 
     private void startEliminatedSpeedrunnerCountdown(Player player) {

@@ -708,6 +708,29 @@ public final class ManhuntPlus extends JavaPlugin {
         }
     }
 
+    public void refreshCompassesForHolder(Player holder) {
+        if (holder == null || !holder.isOnline()) return;
+
+        for (ItemStack item : holder.getInventory().getContents()) {
+            if (item == null || item.getType() != Material.COMPASS) continue;
+            if (!(item.getItemMeta() instanceof CompassMeta meta)) continue;
+
+            String id = meta.getPersistentDataContainer().get(COMPASS_ID_KEY, PersistentDataType.STRING);
+            if (id == null) continue;
+
+            UUID compassId;
+            try {
+                compassId = UUID.fromString(id);
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+
+            Player target = trackedCompasses.get(compassId);
+            if (target == null || !target.isOnline()) continue;
+            updateCompass(item, compassId, target, holder);
+        }
+    }
+
     public void giveCompass(Player target, Player player){
         if (!playingSpeedrunners.contains(target.getUniqueId())) {
             player.sendMessage("§cPlayer is not a playing speedrunner!");
