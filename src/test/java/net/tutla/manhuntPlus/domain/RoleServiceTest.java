@@ -11,16 +11,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoleServiceTest {
     @Test
-    void samePlayerCannotBeHunterAndSpeedrunner() {
+    void addingRoleSwitchesPlayerFromOtherRole() {
         GameState state = new GameState();
         RoleService roles = new RoleService(state);
         UUID playerId = UUID.randomUUID();
 
         assertTrue(roles.addSpeedrunner(playerId));
-        assertFalse(roles.addHunter(playerId));
-        assertTrue(roles.removeSpeedrunner(playerId));
+        assertFalse(roles.hunters().contains(playerId));
+
         assertTrue(roles.addHunter(playerId));
-        assertFalse(roles.addSpeedrunner(playerId));
+        assertFalse(roles.speedrunners().contains(playerId));
+        assertTrue(roles.hunters().contains(playerId));
+
+        assertTrue(roles.addSpeedrunner(playerId));
+        assertTrue(roles.speedrunners().contains(playerId));
+        assertFalse(roles.hunters().contains(playerId));
     }
 
     @Test

@@ -17,9 +17,13 @@ public final class RoleService {
     }
 
     public boolean addSpeedrunner(UUID playerId) {
-        if (playerId == null || state.getHunters().contains(playerId)) {
+        if (playerId == null) {
             return false;
         }
+        if (state.getSpeedrunners().contains(playerId)) {
+            return false;
+        }
+        removeHunter(playerId);
         return state.getSpeedrunners().add(playerId);
     }
 
@@ -34,9 +38,13 @@ public final class RoleService {
     }
 
     public boolean addHunter(UUID playerId) {
-        if (playerId == null || state.getSpeedrunners().contains(playerId)) {
+        if (playerId == null) {
             return false;
         }
+        if (state.getHunters().contains(playerId)) {
+            return false;
+        }
+        removeSpeedrunner(playerId);
         return state.getHunters().add(playerId);
     }
 

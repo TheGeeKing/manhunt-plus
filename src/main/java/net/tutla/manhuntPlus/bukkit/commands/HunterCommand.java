@@ -39,7 +39,7 @@ public final class HunterCommand implements CommandExecutor, TabCompleter {
 
         if (args[0].equalsIgnoreCase("add")) {
             if (!roleService.addHunter(target.getUniqueId())) {
-                sender.sendMessage(Messages.error("Player is already a hunter or is a speedrunner."));
+                sender.sendMessage(Messages.error("Player is already a hunter."));
                 return true;
             }
             Bukkit.broadcastMessage(Messages.ok(target.getName() + " is now a hunter!"));

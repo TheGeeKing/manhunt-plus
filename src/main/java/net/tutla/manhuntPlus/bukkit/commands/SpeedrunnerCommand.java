@@ -39,7 +39,7 @@ public final class SpeedrunnerCommand implements CommandExecutor, TabCompleter {
 
         if (args[0].equalsIgnoreCase("add")) {
             if (!roleService.addSpeedrunner(target.getUniqueId())) {
-                sender.sendMessage(Messages.error("Player is already a speedrunner or is a hunter."));
+                sender.sendMessage(Messages.error("Player is already a speedrunner."));
                 return true;
             }
             Bukkit.broadcastMessage(Messages.ok(target.getName() + " is now a speedrunner!"));
